@@ -95,7 +95,17 @@ function razorpay_config()
                 CAPTURE   => 'Authorize and Capture',
                 AUTHORIZE => 'Authorize',
             ),
-            'Description' => 'Payment action on order compelete.',
+            'Description' => 'Payment action on order complete. "Authorize" payments are NOT captured automatically by WHMCS — they must be captured manually from the Razorpay Dashboard within the authorization window, or they will be auto-refunded by Razorpay.',
+        ),
+        'refundSpeed' => array(
+            'FriendlyName' => 'Refund Speed',
+            'Type' => 'dropdown',
+            'Default' => 'normal',
+            'Options' => array(
+                'normal'  => 'Normal',
+                'optimum' => 'Instant (where eligible)',
+            ),
+            'Description' => 'Speed used when refunds are issued from WHMCS. <a href="https://razorpay.com/docs/refunds/instant/" target="_blank">About instant refunds</a>.',
         ),
         'enableWebhook' => array(
             'FriendlyName' => 'Enable Webhook',
@@ -192,6 +202,53 @@ function createRazorpayOrderId(array $params)
     return $razorpayOrderId;
 }
 
+/**
+ * Refund transaction.
+ * Called when a refund is requested for a previously successful transaction
+ * from the WHMCS admin area.
+ * @param array $params Payment Gateway Module Parameters
+ * @return array Transaction response status
+ */
+function razorpay_refund($params)
+{
+    $api = getRazorpayApiInstance($params);
+
+    $transactionIdToRefund = $params['transid'];
+    $refundAmount = (int) round($params['amount'] * 100); // Required to be converted to Paisa.
+    $refundSpeed = (empty($params['refundSpeed']) === false) ? $params['refundSpeed'] : 'normal';
+
+    try
+    {
+        $payment = $api->payment->fetch($transactionIdToRefund);
+
+        $refund = $payment->refund(array(
+            'amount' => $refundAmount,
+            'speed'  => $refundSpeed,
+        ));
+
+        $refundData = $refund->toArray();
+
+        logTransaction(razorpay_MetaData()['DisplayName'], $refundData, "Refund Successful");
+
+        return array(
+            'status'  => 'success',
+            'rawdata' => $refundData,
+            'transid' => $refund['id'],
+            'fees'    => 0,
+        );
+    }
+    catch (Exception $e)
+    {
+        logTransaction($params['name'], $e->getMessage(), "Unsuccessful - Refund Failed for Payment id: ".$transactionIdToRefund);
+
+        return array(
+            'status'        => 'error',
+            'rawdata'       => $e->getMessage(),
+            'declinereason' => $e->getMessage(),
+        );
+    }
+}
+
 function getExistingOrderDetails($params, $razorpayOrderId)
 {
     try
@@ -220,16 +277,16 @@ function razorpay_link($params)
 
     // Invoice Parameters
     $invoiceId = $params['invoiceid'];
-    $description = $params["description"];
     $amount = (int) round($params['amount'] * 100); // Required to be converted to Paisa.
     $currencyCode = $params['currency'];
 
     // Client Parameters
-    $name = $params['clientdetails']['firstname'].' '.$params['clientdetails']['lastname'];
+    $name = trim($params['clientdetails']['firstname'].' '.$params['clientdetails']['lastname']);
     $email = $params['clientdetails']['email'];
     $contact = $params['clientdetails']['phonenumber'];
 
     // System Parameters
+    $companyName = $params['companyname'];
     $whmcsVersion = $params['whmcsVersion'];
     $razorpayWHMCSVersion = RAZORPAY_WHMCS_VERSION;
     $checkoutUrl = 'https://checkout.razorpay.com/v1/checkout.js';
@@ -265,28 +322,65 @@ function razorpay_link($params)
         }
     }
 
+    // Razorpay's Standard Checkout is meant to be opened from an explicit
+    // user action (rzp.open() must be called from a click handler, browsers
+    // block programmatic popups otherwise). The old auto-embedding
+    // <script data-*> form this module used previously does not reliably
+    // initialise when the invoice's payment HTML is injected into the page
+    // after initial load (e.g. an AJAX-loaded "Make Payment" tab in some
+    // client area templates), which is the likely cause of long-standing
+    // "Pay Now button does nothing" reports. This uses Razorpay's currently
+    // documented explicit button + handler pattern instead.
+    $elementId = 'razorpay-'.preg_replace('/[^a-zA-Z0-9]/', '', (string) $invoiceId);
+
+    $options = array(
+        'key'         => $keyId,
+        'amount'      => $amount,
+        'currency'    => $currencyCode,
+        'name'        => $companyName,
+        'description' => 'Inv#'.$invoiceId,
+        'order_id'    => $razorpayOrderId,
+        'prefill'     => array(
+            'name'    => $name,
+            'email'   => $email,
+            'contact' => $contact,
+        ),
+        'notes' => array(
+            WHMCS_ORDER_ID                 => (string) $invoiceId,
+            'whmcs_version'                 => $whmcsVersion,
+            '_integration'                  => 'whmcs',
+            '_integration_version'          => $razorpayWHMCSVersion,
+            '_integration_parent_version'   => $whmcsVersion,
+            '_integration_type'             => 'plugin',
+        ),
+    );
+
+    // HEX_* flags prevent client-supplied name/email values (which may
+    // contain characters like </script> or quotes) from breaking out of
+    // the inline <script> block below.
+    $optionsJson = json_encode($options, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+    $invoiceIdAttr = htmlspecialchars((string) $invoiceId, ENT_QUOTES, 'UTF-8');
+
     return <<<EOT
-<form name="razorpay-form" id="razorpay-form" action="$callbackUrl" method="POST">
-    <input type="hidden" name="merchant_order_id" id="merchant_order_id" value="$invoiceId"/>
-    <script src="$checkoutUrl"
-        data-key            = "$keyId"
-        data-amount         = "$amount"
-        data-currency       = "$currencyCode"
-        data-order_id       = "$razorpayOrderId"
-        data-description    = "Inv#$invoiceId"
-
-        data-prefill.name   = "$name"
-        data-prefill.email  = "$email"
-        data-prefill.contact= "$contact"
-
-        data-notes.whmcs_order_id = "$invoiceId"
-        data-notes.whmcs_version  = "$whmcsVersion"
-
-        data-_.integration                = "whmcs"
-        data-_.integration_version        = "$razorpayWHMCSVersion"
-        data-_.integration_parent_version = "$whmcsVersion"
-        data-_.integration_type           = "plugin"
-    ></script>
+<form name="razorpay-form" id="$elementId-form" action="$callbackUrl" method="POST">
+    <input type="hidden" name="razorpay_payment_id" id="$elementId-payment-id" />
+    <input type="hidden" name="merchant_order_id" id="merchant_order_id" value="$invoiceIdAttr"/>
+    <input type="button" class="btn btn-success" id="$elementId-button" value="Pay Now" />
 </form>
+<script src="$checkoutUrl"></script>
+<script>
+(function () {
+    var options = $optionsJson;
+    options.handler = function (response) {
+        document.getElementById('$elementId-payment-id').value = response.razorpay_payment_id;
+        document.getElementById('$elementId-form').submit();
+    };
+    var rzp = new Razorpay(options);
+    document.getElementById('$elementId-button').addEventListener('click', function (e) {
+        e.preventDefault();
+        rzp.open();
+    });
+})();
+</script>
 EOT;
 }
