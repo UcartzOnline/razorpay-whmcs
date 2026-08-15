@@ -1,4 +1,8 @@
 <?php
+/**
+ * Modified and maintained by Ucartz (https://www.ucartz.com) for
+ * compatibility with the latest WHMCS releases.
+ */
 
 require_once __DIR__.'/razorpay/razorpay-sdk/Razorpay.php';
 require_once __DIR__.'/razorpay/rzpordermapping.php';
@@ -64,6 +68,12 @@ function razorpay_config()
             'Type' => 'comment',
             'Size' => '50',
             'Description' => 'First <a href="https://easy.razorpay.com/onboarding?recommended_product=payment_gateway&source=whmcs" target="_blank">Signup</a> for a Razorpay account OR <a href="https://dashboard.razorpay.com/signin?screen=sign_in&source=whmcs" target="_blank">Login</a> if you have an existing account.',
+        ),
+        'ucartzModified' => array(
+            'FriendlyName' => '',
+            'Type' => 'comment',
+            'Size' => '50',
+            'Description' => 'This build has been modified and maintained by <a href="https://www.ucartz.com" target="_blank">Ucartz</a> for compatibility with the latest WHMCS.',
         ),
         'keyId' => array(
             'FriendlyName' => 'Key Id',
