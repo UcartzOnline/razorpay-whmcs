@@ -2,6 +2,8 @@
 
 Allows you to use Razorpay payment gateway with the WHMCS Store.
 
+> This fork is modified and maintained by [Ucartz](https://www.ucartz.com) with reliability and PHP 8.2+/WHMCS 9 compatibility fixes on top of the upstream [razorpay/razorpay-whmcs](https://github.com/razorpay/razorpay-whmcs) module.
+
 ## Description
 
 ​This is the Razorpay payment gateway plugin for WHMCS. Allows merchants to accept credit cards, debit cards, netbanking, wallets, UPI and international payment methods with the WHMCS store. It uses a seamless integration, allowing the customer to pay on your website without being redirected away from your WHMCS website.
