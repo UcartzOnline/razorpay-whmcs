@@ -311,7 +311,16 @@ function razorpay_link($params)
     {
         $existingOrder = getExistingOrderDetails($params, $existingRazorpayOrderId);
 
-        if (isset($existingOrder) === true and
+        // Create a new order if:
+        // (a) the existing order could not be fetched from Razorpay (API
+        //     failure / timeout) — we cannot verify the amount, so we must
+        //     not reuse a potentially stale order, or
+        // (b) the stored order amount no longer matches the current invoice
+        //     balance (e.g. a late fee was added or a credit was applied
+        //     after the original order was created).
+        // In all other cases (fetch succeeded and amounts match) it is safe
+        // to reuse the existing order.
+        if (isset($existingOrder) === false ||
             ((int)$existingOrder['amount']) !== ((int)$amount))
         {
             $razorpayOrderId = createRazorpayOrderId($params);
