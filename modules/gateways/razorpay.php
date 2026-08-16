@@ -73,7 +73,7 @@ function razorpay_config()
             'FriendlyName' => '',
             'Type' => 'comment',
             'Size' => '50',
-            'Description' => 'This build has been modified and maintained by <a href="https://www.ucartz.com" target="_blank">Ucartz</a> for compatibility with the latest WHMCS.',
+            'Description' => 'Developed and maintained by <a href="https://www.ucartz.com" target="_blank">Ucartz</a>.',
         ),
         'keyId' => array(
             'FriendlyName' => 'Key Id',
