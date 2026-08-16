@@ -51,8 +51,6 @@ if (isset($result) === true and $result->status === 'Paid')
     exit;
 }
 
-$amount = $result->total;
-
 $error = "";
 
 try
@@ -62,9 +60,22 @@ try
 
     verifySignature($merchant_order_id, $_POST, $gatewayParams);
 
+    // Credit the amount Razorpay actually captured for THIS payment - never
+    // a value re-derived from the invoice (e.g. its `total` column, as this
+    // callback used to do). An invoice's total does not reflect what a
+    // given transaction actually collected: e.g. when a customer pays off
+    // only an outstanding late fee, Razorpay correctly charges just that
+    // smaller amount, but the invoice's total column still holds the full
+    // original amount. Crediting that instead of the real captured amount
+    // wrongly marks the invoice as fully paid despite Razorpay only having
+    // collected a fraction of it - silently under-collecting revenue.
+    $api = getApiInstance($gatewayParams['keyId'], $gatewayParams['keySecret']);
+    $razorpayPayment = $api->payment->fetch($razorpay_payment_id);
+    $amountPaid = ((float) $razorpayPayment['amount']) / 100;
+
     # Successful
     # Apply Payment to Invoice: invoiceid, transactionid, amount paid, fees, modulename
-    addInvoicePayment($merchant_order_id, $razorpay_payment_id, $amount, 0, $gatewayModuleName);
+    addInvoicePayment($merchant_order_id, $razorpay_payment_id, $amountPaid, 0, $gatewayModuleName);
 
     logTransaction($gatewayParams["name"], $_POST, "Successful"); # Save to Gateway Log: name, data array, status
 }
@@ -75,6 +86,16 @@ catch (Errors\SignatureVerificationError $e)
     # Unsuccessful
     # Save to Gateway Log: name, data array, status
     logTransaction($gatewayParams["name"], $_POST, "Unsuccessful-".$error . ". Please check razorpay dashboard for Payment id: ".$razorpay_payment_id);
+}
+catch (Exception $e)
+{
+    // Signature was valid (the payment is genuine) but we could not confirm
+    // the actual captured amount from Razorpay. Deliberately do NOT apply
+    // any payment here - guessing an amount is exactly the dangerous
+    // behaviour being fixed. This needs manual reconciliation instead.
+    $error = 'WHMCS_ERROR: Payment to Razorpay succeeded but the captured amount could not be verified: ' . $e->getMessage();
+
+    logTransaction($gatewayParams["name"], $_POST, "Unsuccessful-".$error." Payment id: ".$razorpay_payment_id." was NOT applied to invoice ".$merchant_order_id.". Verify the actual amount captured on the Razorpay Dashboard and apply it to the invoice manually.");
 }
 
 header("Location: ".$gatewayParams['systemurl']."/viewinvoice.php?id=" . $merchant_order_id); // nosemgrep : php.lang.security.non-literal-header.non-literal-header
