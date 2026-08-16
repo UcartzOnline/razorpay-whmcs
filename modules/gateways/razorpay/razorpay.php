@@ -125,26 +125,31 @@ function verifySignature(int $order_no, array $response, $gatewayParams)
     );
 
     $sessionKey = getOrderSessionKey($order_no);
-    $razorpayOrderId = "";
+    $razorpayOrderId = null;
 
-    if (isset($_SESSION[$sessionKey]) === true)
+    try
     {
-        $razorpayOrderId = $_SESSION[$sessionKey];
+        $rzpOrderMapping = new RZPOrderMapping($gatewayParams['name']);
+        $razorpayOrderId = $rzpOrderMapping->getRazorpayOrderID($order_no);
     }
-    else
+    catch (Exception $e)
     {
-        logTransaction($gatewayParams['name'], $sessionKey, "Session not found");
-        try
-        {
-            $rzpOrderMapping = new RZPOrderMapping($gatewayParams['name']);
-            $razorpayOrderId = $rzpOrderMapping->getRazorpayOrderID($order_no);
-        }
-        catch (Exception $e)
-        {
-            logTransaction($gatewayParams['name'], $e->getMessage(), "Unsuccessful - Fetch Order");
-        }
+        logTransaction($gatewayParams['name'], $e->getMessage(), "Unsuccessful - Fetch Order from DB");
     }
 
-    $attributes[RAZORPAY_ORDER_ID] = (isset($razorpayOrderId) === true) ? $razorpayOrderId : "";
+    if (empty($razorpayOrderId) === true)
+    {
+        if (isset($_SESSION[$sessionKey]) === true)
+        {
+            $razorpayOrderId = $_SESSION[$sessionKey];
+        }
+        else
+        {
+            logTransaction($gatewayParams['name'], "Order ID not found in DB or Session", "Unsuccessful - Verification");
+            throw new Exception("Razorpay Order ID not found.");
+        }
+    }
+
+    $attributes[RAZORPAY_ORDER_ID] = $razorpayOrderId;
     $api->utility->verifyPaymentSignature($attributes);
 }
