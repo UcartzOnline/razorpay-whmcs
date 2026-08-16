@@ -153,9 +153,9 @@ function createRazorpayOrderId(array $params)
     $api = getRazorpayApiInstance($params);
 
     $data = array(
-        'receipt'         => $params['invoiceid'],
+        'receipt'         => (string) $params['invoiceid'],
         'amount'          => (int) round($params['amount'] * 100),
-        'currency'        => $params['currency'],
+        'currency'        => (string) $params['currency'],
         'payment_capture' => ($params['paymentAction'] === AUTHORIZE) ? 0 : 1,
         'notes'           => array(
             WHMCS_ORDER_ID  => (string) $params['invoiceid'],
