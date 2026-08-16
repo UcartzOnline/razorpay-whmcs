@@ -73,9 +73,16 @@ try
     $razorpayPayment = $api->payment->fetch($razorpay_payment_id);
     $amountPaid = ((float) $razorpayPayment['amount']) / 100;
 
+    // Razorpay returns fee (total gateway charge including GST) in paise.
+    // Only populated after capture; null for authorize-only payments — fall
+    // back to 0 so the invoice is still credited correctly in that case.
+    // This value is what Razorpay deducts from your settlement and matches
+    // the "Fee" column in your Razorpay Dashboard.
+    $gatewayFee = round(((float) ($razorpayPayment['fee'] ?? 0)) / 100, 2);
+
     # Successful
     # Apply Payment to Invoice: invoiceid, transactionid, amount paid, fees, modulename
-    addInvoicePayment($merchant_order_id, $razorpay_payment_id, $amountPaid, 0, $gatewayModuleName);
+    addInvoicePayment($merchant_order_id, $razorpay_payment_id, $amountPaid, $gatewayFee, $gatewayModuleName);
 
     logTransaction($gatewayParams["name"], $_POST, "Successful"); # Save to Gateway Log: name, data array, status
 }
@@ -127,6 +134,11 @@ function verifySignature(int $order_no, array $response, $gatewayParams)
     $sessionKey = getOrderSessionKey($order_no);
     $razorpayOrderId = null;
 
+    // 1. DB is the authoritative source for the Razorpay order ID.
+    //    Per Razorpay documentation, the order ID used for signature
+    //    verification must come from the server, never from a client-supplied
+    //    value. tblrzpordermapping always holds the latest order created for
+    //    this invoice (most recently written by createRazorpayOrderId()).
     try
     {
         $rzpOrderMapping = new RZPOrderMapping($gatewayParams['name']);
@@ -137,6 +149,11 @@ function verifySignature(int $order_no, array $response, $gatewayParams)
         logTransaction($gatewayParams['name'], $e->getMessage(), "Unsuccessful - Fetch Order from DB");
     }
 
+    // 2. Session fallback: if the DB lookup failed (e.g. DB error), try the
+    //    PHP session set by razorpay_link() during order creation.
+    //    NOTE: this path is unreliable under Lagom and similar themes that
+    //    load the payment tab via AJAX or when the PHP session has expired —
+    //    which is why the DB is checked first.
     if (empty($razorpayOrderId) === true)
     {
         if (isset($_SESSION[$sessionKey]) === true)
