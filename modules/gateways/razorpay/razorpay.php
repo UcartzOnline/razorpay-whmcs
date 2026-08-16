@@ -46,7 +46,7 @@ $result = Capsule::table('tblinvoices')->where('id', $merchant_order_id)->first(
 #check whether order is already paid or not, if paid then redirect to complete page
 if (isset($result) === true and $result->status === 'Paid')
 {
-    header("Location: ".$gatewayParams['systemurl']."/viewinvoice.php?id=" . $merchant_order_id); // nosemgrep : php.lang.security.non-literal-header.non-literal-header
+    header("Location: " . rtrim($gatewayParams['systemurl'], '/') . "/viewinvoice.php?id=" . $merchant_order_id); // nosemgrep : php.lang.security.non-literal-header.non-literal-header
 
     exit;
 }
@@ -105,7 +105,7 @@ catch (Exception $e)
     logTransaction($gatewayParams["name"], $_POST, "Unsuccessful-".$error." Payment id: ".$razorpay_payment_id." was NOT applied to invoice ".$merchant_order_id.". Verify the actual amount captured on the Razorpay Dashboard and apply it to the invoice manually.");
 }
 
-header("Location: ".$gatewayParams['systemurl']."/viewinvoice.php?id=" . $merchant_order_id); // nosemgrep : php.lang.security.non-literal-header.non-literal-header
+header("Location: " . rtrim($gatewayParams['systemurl'], '/') . "/viewinvoice.php?id=" . $merchant_order_id); // nosemgrep : php.lang.security.non-literal-header.non-literal-header
 
 /**
 * @codeCoverageIgnore
@@ -134,26 +134,27 @@ function verifySignature(int $order_no, array $response, $gatewayParams)
     $sessionKey = getOrderSessionKey($order_no);
     $razorpayOrderId = null;
 
-    // 1. DB is the authoritative source for the Razorpay order ID.
-    //    Per Razorpay documentation, the order ID used for signature
-    //    verification must come from the server, never from a client-supplied
-    //    value. tblrzpordermapping always holds the latest order created for
-    //    this invoice (most recently written by createRazorpayOrderId()).
-    try
+    // 1. Direct POST from Razorpay Checkout handler
+    if (empty($response[RAZORPAY_ORDER_ID]) === false)
     {
-        $rzpOrderMapping = new RZPOrderMapping($gatewayParams['name']);
-        $razorpayOrderId = $rzpOrderMapping->getRazorpayOrderID($order_no);
-    }
-    catch (Exception $e)
-    {
-        logTransaction($gatewayParams['name'], $e->getMessage(), "Unsuccessful - Fetch Order from DB");
+        $razorpayOrderId = $response[RAZORPAY_ORDER_ID];
     }
 
-    // 2. Session fallback: if the DB lookup failed (e.g. DB error), try the
-    //    PHP session set by razorpay_link() during order creation.
-    //    NOTE: this path is unreliable under Lagom and similar themes that
-    //    load the payment tab via AJAX or when the PHP session has expired —
-    //    which is why the DB is checked first.
+    // 2. DB fallback (tblrzpordermapping)
+    if (empty($razorpayOrderId) === true)
+    {
+        try
+        {
+            $rzpOrderMapping = new RZPOrderMapping($gatewayParams['name']);
+            $razorpayOrderId = $rzpOrderMapping->getRazorpayOrderID($order_no);
+        }
+        catch (Exception $e)
+        {
+            logTransaction($gatewayParams['name'], $e->getMessage(), "Unsuccessful - Fetch Order from DB");
+        }
+    }
+
+    // 3. Session fallback
     if (empty($razorpayOrderId) === true)
     {
         if (isset($_SESSION[$sessionKey]) === true)
@@ -162,7 +163,7 @@ function verifySignature(int $order_no, array $response, $gatewayParams)
         }
         else
         {
-            logTransaction($gatewayParams['name'], "Order ID not found in DB or Session", "Unsuccessful - Verification");
+            logTransaction($gatewayParams['name'], "Order ID not found in POST, DB or Session", "Unsuccessful - Verification");
             throw new Exception("Razorpay Order ID not found.");
         }
     }

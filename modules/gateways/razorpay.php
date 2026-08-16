@@ -168,7 +168,13 @@ function createRazorpayOrderId(array $params)
     }
     catch (Exception $e)
     {
-        return $e;
+        logTransaction(razorpay_MetaData()['DisplayName'], $e->getMessage(), "Unsuccessful - Create Order");
+        return null;
+    }
+
+    if (empty($razorpayOrder['id']) === true)
+    {
+        return null;
     }
 
     $razorpayOrderId = $razorpayOrder['id'];
@@ -187,7 +193,7 @@ function createRazorpayOrderId(array $params)
             "razorpay_order_id" => $razorpayOrderId
         ];
         logTransaction(razorpay_MetaData()['DisplayName'], $error, "Validation Failure");
-        return;
+        return null;
     }
 
     try
@@ -373,6 +379,8 @@ function razorpay_link($params)
     return <<<EOT
 <form name="razorpay-form" id="$elementId-form" action="$callbackUrl" method="POST">
     <input type="hidden" name="razorpay_payment_id" id="$elementId-payment-id" />
+    <input type="hidden" name="razorpay_order_id" id="$elementId-order-id" />
+    <input type="hidden" name="razorpay_signature" id="$elementId-signature" />
     <input type="hidden" name="merchant_order_id" id="merchant_order_id" value="$invoiceIdAttr"/>
     <input type="button" class="btn btn-success" id="$elementId-button" value="Pay Now" />
 </form>
@@ -382,6 +390,8 @@ function razorpay_link($params)
     var options = $optionsJson;
     options.handler = function (response) {
         document.getElementById('$elementId-payment-id').value = response.razorpay_payment_id;
+        document.getElementById('$elementId-order-id').value = response.razorpay_order_id;
+        document.getElementById('$elementId-signature').value = response.razorpay_signature;
         document.getElementById('$elementId-form').submit();
     };
     var rzp = new Razorpay(options);
